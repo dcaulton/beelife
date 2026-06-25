@@ -1,11 +1,14 @@
 from collections.abc import AsyncGenerator, Generator
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
 from beelife.db.models import SQLModel
+from beelife.db.session import get_db
+from beelife.main import app
 
 
 @pytest.fixture(scope="function")
@@ -52,3 +55,19 @@ async def async_session(async_engine: AsyncEngine) -> AsyncGenerator[AsyncSessio
     await session.close()
     await transaction.rollback()
     await connection.close()
+
+
+@pytest.fixture
+async def async_client(async_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Async HTTP client that uses the test database."""
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        yield async_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+    app.dependency_overrides.clear()

@@ -35,3 +35,6 @@ docker-down:
 clean:
 	rm -rf .venv uv.lock
 	find . -type d -name __pycache__ -exec rm -rf {} +
+
+dev:
+	uv run uvicorn beelife.main:app --reload --port 8120 --host 0.0.0.0
