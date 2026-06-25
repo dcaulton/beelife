@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: beelife-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: beelife
+      POSTGRES_PASSWORD: beelife_dev
+      POSTGRES_DB: beelife
+    ports:
+      - "5434:5432"          # <-- Changed to 5434
+    volumes:
+      - beelife_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beelife"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  beelife_pgdata:
