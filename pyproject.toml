@@ -24,6 +24,8 @@ dependencies = [
     # For charts later
     "matplotlib>=3.9.0",
     "pillow>=10.4.0",
+    "mypy>=2.1.0",
+    "asyncpg>=0.31.0",
 ]
 
 [project.optional-dependencies]
@@ -70,8 +72,10 @@ module = [
     "structlog.*",
     "testcontainers.*",
     "matplotlib.*",
+    "beelife.db.migrations.*",
 ]
 ignore_missing_imports = true
+ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

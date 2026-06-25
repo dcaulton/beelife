@@ -1,10 +1,8 @@
-.PHONY: install sync lint format test run migrate docker-up docker-down clean
+.PHONY: install sync lint format test run migrate alembic-revision docker-up docker-down clean
 
 install:
 	uv sync --extra dev
-
-pre-commit-install:
-  uvx pre-commit install
+	uv pip install -e .
 
 sync:
 	uv sync
@@ -23,7 +21,10 @@ run:
 	uv run python main.py
 
 migrate:
-	uv run alembic upgrade head
+	uv run --with-editable . alembic upgrade head
+
+alembic-revision:
+	uv run --with-editable . alembic revision --autogenerate -m "$(m)"
 
 docker-up:
 	docker compose up -d
