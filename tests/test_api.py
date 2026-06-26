@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _make_beedar_csv() -> bytes:
@@ -121,3 +122,26 @@ async def test_bulk_create_weather_from_csv(async_client: AsyncClient) -> None:
     response = await async_client.post("/v1/weather/bulk", files=files)
     assert response.status_code == 201
     assert response.json()["created"] == 1
+
+
+@pytest.mark.asyncio
+async def test_beedar_upload_creates_device_if_missing(async_client: AsyncClient, async_session: AsyncSession) -> None:
+    csv_bytes = _make_beedar_csv()  # uses device_id "63:02:21"
+    files = {"file": ("test_beedar.csv", csv_bytes, "text/csv")}
+
+    # Upload
+    response = await async_client.post("/v1/beedar/readings/bulk", files=files)
+    assert response.status_code == 201
+
+    # Verify device was auto-created
+    from beelife.db.repositories import DeviceRepository
+
+    repo = DeviceRepository(async_session)
+    device = await repo.get("63:02:21")
+
+    assert device is not None
+    assert device.device_id == "63:02:21"
+    assert device.location_name == "Darien IL"
+    assert device.latitude == 41.75
+    assert device.longitude == -87.98
+    assert device.type == "beedar"

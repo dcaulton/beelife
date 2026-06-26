@@ -60,3 +60,27 @@ class BeeDarReading(SQLModel, table=True):
 
 # Useful indexes
 Index("ix_beedar_readings_device_time", "device_id", "timestamp")
+
+
+class Device(SQLModel, table=True):
+    __tablename__ = "devices"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    device_id: str = Field(unique=True, index=True)  # e.g. "63:02:21"
+    name: str | None = None
+    type: str = Field(default="beedar")
+    hive_position: str | None = None
+
+    # Location (for weather APIs and future use)
+    latitude: float | None = None
+    longitude: float | None = None
+    location_name: str | None = None
+
+    installed_at: datetime | None = None
+    notes: str | None = None
+    is_active: bool = Field(default=True)
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
+    )

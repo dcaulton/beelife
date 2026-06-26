@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 
-from beelife.api.v1.routers import beedar, weather
+from beelife.api.v1.routers import beedar, devices, weather
 
 app = FastAPI(title="beelife")
 
 app.include_router(beedar.router, prefix="/v1")
+app.include_router(devices.router, prefix="/v1")
 app.include_router(weather.router, prefix="/v1")
 
 
