@@ -1,6 +1,7 @@
 import json
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
+from uuid import UUID
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from beelife.analysis.tools import (
     get_daily_bee_activity,
     get_daily_weather_data,
 )
+from beelife.db.models import AnalysisReportRecord
 from beelife.db.repositories import get_default_device
 
 logger = structlog.get_logger(__name__)
@@ -23,6 +25,7 @@ async def generate_analysis_report(
     device_id: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    report_id: UUID | None = None,
 ) -> AnalysisReport:
     """
     Generate a structured weather + bee status analysis report using LLM + tools.
@@ -40,14 +43,15 @@ async def generate_analysis_report(
         start_date = end_date - timedelta(days=7)
 
     logger.debug(
-        "analysis_report_requested",
+        "analysis_report_start",
         device_id=device_id,
         start_date=str(start_date),
         end_date=str(end_date),
+        report_id=str(report_id) if report_id else None,
     )
 
     # --- Set up LLM and register tools ---
-    llm = LLMClient(model="qwen2.5:32b")
+    llm = LLMClient()
 
     llm.register_tool(
         Tool(
@@ -83,43 +87,58 @@ async def generate_analysis_report(
     # --- System prompt with structured output instruction ---
     system_prompt = f"""You are an expert beekeeping data analyst.
 
-You have access to tools that can retrieve weather and bee activity data for device {device_id}.
+    You have access to tools that can retrieve weather and bee activity data.
 
-Your task:
-1. Use the available tools to gather relevant data between {start_date} and {end_date}.
-2. Analyze weather trends, bee activity levels, and how weather affects the bees.
-3. Return ONLY a valid JSON object that matches this exact schema:
+    Analyze the data for device {device_id} between {start_date} and {end_date}.
 
-{json.dumps(AnalysisReport.model_json_schema(), indent=2)}
+    After using tools, respond **ONLY** with a valid JSON object that exactly matches this schema:
 
-Do not include any extra text before or after the JSON. Be concise but insightful.
-"""
+    {json.dumps(AnalysisReport.model_json_schema(), indent=2)}
+
+    Do not add any extra text, explanations, or markdown before or after the JSON.
+    """
 
     messages = [
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
             "content": f"Analyze the data for device {device_id} from {start_date} to {end_date} "
-            f"and return the analysis as JSON.",
+            f"and return only the JSON analysis report.",
         },
     ]
 
-    # --- Call LLM with tools ---
+    # --- Call LLM with tools + force JSON output ---
     final_message = await llm.call_with_tools(messages)
 
-    # --- Parse final response into AnalysisReport ---
+    # After getting final_message from llm.call_with_tools()
+
     try:
         content = final_message.get("content", "").strip()
-        # Remove markdown code blocks if present
+
+        # Strip markdown code blocks if present
         if content.startswith("```"):
-            content = content.split("```")[1].strip()
-            if content.startswith("json"):
+            content = content.split("```")[1]
+            if content.lower().startswith("json"):
                 content = content[4:].strip()
 
         report = AnalysisReport.model_validate_json(content)
-        logger.debug("analysis_report_parsed_successfully", device_id=device_id)
-        return report
 
     except Exception as e:
-        logger.exception("failed_to_parse_llm_response", error=str(e), raw_content=final_message.get("content"))
-        raise ValueError("LLM failed to return valid structured output") from e
+        logger.error(
+            "llm_structured_output_failed",
+            raw_content=final_message.get("content"),
+            error_type=type(e).__name__,
+            error=str(e),
+        )
+        raise ValueError(f"LLM failed to return valid structured output: {e}") from e
+
+    # Only reach here if parsing succeeded
+    if report_id:
+        record = await session.get(AnalysisReportRecord, report_id)
+        if record:
+            record.status = "completed"
+            record.completed_at = datetime.now(UTC)
+            record.report_data = report.model_dump(mode="json")
+            await session.commit()
+
+    return report

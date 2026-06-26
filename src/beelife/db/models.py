@@ -84,3 +84,29 @@ class Device(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), server_default=func.now()),
     )
+
+
+class AnalysisReportRecord(SQLModel, table=True):
+    __tablename__ = "analysis_reports"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    device_id: str = Field(index=True)
+
+    status: str = Field(default="pending", index=True)  # pending | completed | failed
+    started_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    completed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    error_message: str | None = None
+
+    # Full structured report stored as JSONB
+    report_data: dict | None = Field(default=None, sa_column=Column(JSONB().with_variant(JSON, "sqlite")))
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
+    )

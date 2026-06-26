@@ -67,6 +67,7 @@ class LLMClient:
                 model=self.model,
                 messages=messages,
                 tools=tool_schemas,
+                format="json",
             )
 
             message = response["message"]
