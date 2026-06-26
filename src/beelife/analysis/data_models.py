@@ -50,3 +50,24 @@ class DateRange(BaseModel):
 
     start_date: date
     end_date: date
+
+
+class DailyForecast(BaseModel):
+    """Structured daily forecast from National Weather Service."""
+
+    date: date
+    name: str | None = None  # e.g. "This Afternoon", "Tonight"
+    temperature: int | None = None
+    temperature_unit: str | None = None  # "F" or "C"
+    short_forecast: str | None = None
+    detailed_forecast: str | None = None
+    wind_speed: str | None = None
+    wind_direction: str | None = None
+    precipitation_chance: int | None = None  # percentage
+
+
+class WeatherForecastInput(BaseModel):
+    """Input for the weather forecast tool."""
+
+    device_id: str | None = None
+    days: int = 7

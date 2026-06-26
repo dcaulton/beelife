@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -49,19 +50,12 @@ class LLMClient:
     async def call_with_tools(
         self,
         messages: list[dict],
-        max_tool_rounds: int = 3,
-    ) -> dict[str, Any]:
-        """
-        Call the LLM and handle tool execution (supports parallel tool calls).
-        """
+        max_tool_rounds: int = 5,
+    ) -> dict:
         tool_schemas = [t.to_ollama_schema() for t in self.tools.values()]
 
         for round_num in range(max_tool_rounds):
-            logger.debug(
-                "llm_call_start",
-                round=round_num + 1,
-                model=self.model,
-            )
+            logger.debug("llm_call_start", round=round_num + 1, model=self.model)
 
             response = self.client.chat(
                 model=self.model,
@@ -75,11 +69,29 @@ class LLMClient:
 
             tool_calls = message.get("tool_calls", [])
 
+            # Fallback: some models put tool calls in the content as JSON
+            if not tool_calls and message.get("content"):
+                content = message["content"].strip()
+                if content.startswith("{") and '"name":' in content and '"arguments":' in content:
+                    try:
+                        parsed = json.loads(content)
+                        if "name" in parsed and "arguments" in parsed:
+                            tool_calls = [
+                                {
+                                    "function": {
+                                        "name": parsed["name"],
+                                        "arguments": parsed["arguments"],
+                                    }
+                                }
+                            ]
+                    except Exception:
+                        pass
+
             if not tool_calls:
                 logger.debug("llm_final_answer", content=message.get("content"))
-                return messages[-1]
+                return message  # type: ignore[no-any-return]
 
-            # Execute all tool calls in parallel
+            # Execute tool calls (parallel)
             tasks = []
             for tool_call in tool_calls:
                 function = tool_call["function"]
@@ -87,42 +99,25 @@ class LLMClient:
                 arguments = function.get("arguments", {})
 
                 if tool_name not in self.tools:
-                    logger.warning("unknown_tool_called", tool=tool_name)
+                    logger.warning("unknown_tool", tool=tool_name)
                     continue
 
                 tool = self.tools[tool_name]
                 validated_args = tool.parameters_model(**arguments)
 
-                logger.debug(
-                    "tool_call",
-                    tool=tool_name,
-                    arguments=arguments,
-                )
-
-                # Schedule the tool execution
+                logger.debug("tool_call", tool=tool_name, arguments=arguments)
                 tasks.append(self._execute_tool(tool, validated_args))
 
             if tasks:
-                tool_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                for result in tool_results:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
                     if isinstance(result, Exception):
                         logger.exception("tool_execution_failed", error=str(result))
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "content": f"Error: {result}",
-                            }
-                        )
+                        messages.append({"role": "tool", "content": f"Error: {result}"})
                     else:
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "content": str(result),
-                            }
-                        )
+                        messages.append({"role": "tool", "content": str(result)})
 
-        logger.warning("max_tool_rounds_exceeded", max_rounds=max_tool_rounds)
+        logger.warning("max_tool_rounds_exceeded")
         return messages[-1]
 
     async def _execute_tool(self, tool: Tool, validated_args: BaseModel) -> Any:

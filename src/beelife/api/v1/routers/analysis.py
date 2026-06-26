@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -23,11 +23,15 @@ async def daily_analysis_report(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     device_id: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict:
-    """Start analysis in background and return report_id immediately."""
+    """Start a report generation job. Returns immediately with the report_id."""
     record = AnalysisReportRecord(
         device_id=device_id or "unknown",
         status="pending",
+        period_start=start_date,
+        period_end=end_date,
     )
     db.add(record)
     await db.commit()
@@ -37,6 +41,8 @@ async def daily_analysis_report(
         _run_analysis_in_background,
         report_id=record.id,
         device_id=device_id,
+        start_date=start_date,
+        end_date=end_date,
         db=db,
     )
 
@@ -46,30 +52,29 @@ async def daily_analysis_report(
 async def _run_analysis_in_background(
     report_id: UUID,
     device_id: str | None,
+    start_date: date | None,
+    end_date: date | None,
     db: AsyncSession,
 ) -> None:
-    """Wrapper that runs in the background and updates the report record."""
-    ## TODO: Passing the AsyncSession from the request into a background task can be risky
-    #   (the session may be closed after the request ends). A safer pattern is to create a
-    #   new session inside _run_analysis_in_background. We can improve this in the next
-    #   iteration if needed.
     try:
         report = await generate_analysis_report(
             session=db,
             device_id=device_id,
-            report_id=report_id,  # ← pass the ID so it gets updated
+            start_date=start_date,
+            end_date=end_date,
+            report_id=report_id,
         )
 
-        # Update record on success
         record = await db.get(AnalysisReportRecord, report_id)
         if record:
             record.status = "completed"
             record.completed_at = datetime.now(UTC)
+            record.period_start = start_date
+            record.period_end = end_date
             record.report_data = report.model_dump(mode="json")
             await db.commit()
 
     except Exception as e:
-        # Update record on failure
         record = await db.get(AnalysisReportRecord, report_id)
         if record:
             record.status = "failed"

@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from beelife.analysis.tools import (
     get_daily_bee_activity,
     get_daily_weather_data,
+    get_weather_forecast,
 )
-from beelife.db.models import BeeDarReading, WeatherObservation
+from beelife.db.models import BeeDarReading, Device, WeatherObservation
 
 
 @pytest.mark.asyncio
@@ -60,3 +62,54 @@ async def test_get_daily_bee_activity(async_session: AsyncSession) -> None:
     assert len(results) == 2
     assert results[0].avg_radar_activity == 40.0
     assert results[1].avg_radar_activity == 50.0
+
+
+@pytest.mark.asyncio
+async def test_get_weather_forecast_mocked(async_session: AsyncSession) -> None:
+    # Create a device with location
+    device = Device(
+        device_id="63:02:21",
+        latitude=41.75,
+        longitude=-87.98,
+        location_name="Darien IL",
+    )
+    async_session.add(device)
+    await async_session.commit()
+
+    # Mock NWS responses
+    mock_points_response = MagicMock()
+    mock_points_response.json.return_value = {
+        "properties": {"forecast": "https://api.weather.gov/gridpoints/TEST/1,2/forecast"}
+    }
+
+    mock_forecast_response = MagicMock()
+    mock_forecast_response.json.return_value = {
+        "properties": {
+            "periods": [
+                {
+                    "startTime": "2026-06-26T00:00:00Z",
+                    "name": "This Afternoon",
+                    "temperature": 78,
+                    "temperatureUnit": "F",
+                    "shortForecast": "Sunny",
+                    "detailedForecast": "Sunny with light winds.",
+                    "windSpeed": "5 mph",
+                    "windDirection": "SW",
+                    "probabilityOfPrecipitation": {"value": 10},
+                }
+            ]
+        }
+    }
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [mock_points_response, mock_forecast_response]
+
+        forecasts = await get_weather_forecast(
+            session=async_session,
+            device_id="63:02:21",
+            days=1,
+        )
+
+    assert len(forecasts) == 1
+    assert forecasts[0].temperature == 78
+    assert forecasts[0].short_forecast == "Sunny"

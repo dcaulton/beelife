@@ -1,16 +1,19 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from statistics import correlation
 from typing import Any, Literal
 
+import httpx
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from beelife.analysis.data_models import (
     CorrelationResult,
     DailyActivitySummary,
+    DailyForecast,
     DailyWeatherSummary,
     TrendComparison,
 )
+from beelife.db.models import Device
 
 # ============================================================
 # Core Low-Level Tools
@@ -211,25 +214,79 @@ async def get_activity_weather_correlation(
     )
 
 
+async def get_weather_forecast(
+    session: AsyncSession, device_id: str | None = None, days: int = 7
+) -> list[DailyForecast]:
+    """
+    Get weather forecast from National Weather Service.
+
+    If device_id is not provided, it will try to use the single active device
+    (same behavior as generate_analysis_report).
+    """
+    from beelife.db.repositories import get_default_device
+
+    # Resolve device_id if not provided
+    if device_id is None:
+        default_device = await get_default_device(session)
+        if default_device is None:
+            raise ValueError("No default device available. Please specify device_id.")
+        device_id = default_device.device_id
+
+    # Get device location
+    stmt = select(Device).where(Device.device_id == device_id)  # type: ignore[arg-type]
+    result = await session.execute(stmt)
+    device = result.scalar_one_or_none()
+    if not device or device.latitude is None or device.longitude is None:
+        raise ValueError(f"Device {device_id} does not have latitude/longitude configured.")
+
+    lat = device.latitude
+    lon = device.longitude
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # Step 1: Get forecast endpoint from points API
+        points_url = f"https://api.weather.gov/points/{lat},{lon}"
+        points_resp = await client.get(points_url)
+        points_resp.raise_for_status()
+        points_data = points_resp.json()
+
+        forecast_url = points_data["properties"]["forecast"]
+
+        # Step 2: Get the forecast
+        forecast_resp = await client.get(forecast_url)
+        forecast_resp.raise_for_status()
+        forecast_data = forecast_resp.json()
+
+        periods = forecast_data["properties"]["periods"]
+
+        forecasts: list[DailyForecast] = []
+        for period in periods:
+            try:
+                forecast_date = datetime.fromisoformat(period["startTime"].replace("Z", "+00:00")).date()
+
+                precip = period.get("probabilityOfPrecipitation", {}).get("value")
+
+                forecasts.append(
+                    DailyForecast(
+                        date=forecast_date,
+                        name=period.get("name"),
+                        temperature=period.get("temperature"),
+                        temperature_unit=period.get("temperatureUnit"),
+                        short_forecast=period.get("shortForecast"),
+                        detailed_forecast=period.get("detailedForecast"),
+                        wind_speed=period.get("windSpeed"),
+                        wind_direction=period.get("windDirection"),
+                        precipitation_chance=precip,
+                    )
+                )
+            except Exception:
+                continue
+
+        return forecasts[:days]
+
+
 # ============================================================
 # Placeholder Tools (return dummy data for now)
 # ============================================================
-
-
-async def get_weather_forecast(days: int = 7) -> list[dict]:
-    """Placeholder for 7-day National Weather Service forecast."""
-    # Dummy data until NWS integration is added
-    base_date = date.today()
-    return [
-        {
-            "date": (base_date + timedelta(days=i)).isoformat(),
-            "summary": "Mostly sunny with light winds.",
-            "high_temp": 78 + i,
-            "low_temp": 58 + i,
-            "precipitation_chance": 10,
-        }
-        for i in range(days)
-    ]
 
 
 async def get_long_term_trends(current_start: date, current_end: date, comparison_year: int) -> dict:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import JSON, Column, DateTime, Index, func
@@ -91,6 +91,9 @@ class AnalysisReportRecord(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     device_id: str = Field(index=True)
+
+    period_start: date | None = None
+    period_end: date | None = None
 
     status: str = Field(default="pending", index=True)  # pending | completed | failed
     started_at: datetime = Field(

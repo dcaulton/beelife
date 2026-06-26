@@ -6,13 +6,14 @@ from uuid import UUID
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from beelife.analysis.data_models import DateRange
+from beelife.analysis.data_models import DateRange, WeatherForecastInput
 from beelife.analysis.llm import LLMClient, Tool
 from beelife.analysis.report_models import AnalysisReport
 from beelife.analysis.tools import (
     get_activity_weather_correlation,
     get_daily_bee_activity,
     get_daily_weather_data,
+    get_weather_forecast,
 )
 from beelife.db.models import AnalysisReportRecord
 from beelife.db.repositories import get_default_device
@@ -80,22 +81,44 @@ async def generate_analysis_report(
         )
     )
 
+    llm.register_tool(
+        Tool(
+            name="get_weather_forecast",
+            description=(
+                "Get the 7-day weather forecast from the National Weather Service "
+                "for the device's location. You should call this tool to populate "
+                "the forecast_7day_summary field in the final report."
+            ),
+            function=partial(get_weather_forecast, session),
+            parameters_model=WeatherForecastInput,
+        )
+    )
+
     # Temporarily disabled until we create proper input models
     # llm.register_tool(Tool(name="get_trend_comparison", ...))
-    # llm.register_tool(Tool(name="get_weather_forecast", ...))
 
     # --- System prompt with structured output instruction ---
     system_prompt = f"""You are an expert beekeeping data analyst.
 
-    You have access to tools that can retrieve weather and bee activity data.
+    You have access to tools that can retrieve:
+    - Historical and current weather data
+    - Bee activity data (radar + vibration)
+    - Correlations between weather and bee behavior
+    - Weather forecasts from the National Weather Service
 
-    Analyze the data for device {device_id} between {start_date} and {end_date}.
+    Your task is to analyze the period from {start_date} to {end_date} for device {device_id}.
 
-    After using tools, respond **ONLY** with a valid JSON object that exactly matches this schema:
+    **Critical instructions:**
+    - You **must** call the `get_weather_forecast` tool to get the 7-day outlook.
+    - Use the forecast data to include a meaningful `forecast_7day_summary` in your final report.
+    - After using tools, return ONLY a valid JSON object matching the `AnalysisReport` schema below.
+    - Do not include any text, explanations, or markdown before or after the JSON.
 
+    After using tools, you must output ONLY the final JSON report. Do not output any more
+    function calls or tool JSON objects.
+
+    Schema:
     {json.dumps(AnalysisReport.model_json_schema(), indent=2)}
-
-    Do not add any extra text, explanations, or markdown before or after the JSON.
     """
 
     messages = [
@@ -115,11 +138,19 @@ async def generate_analysis_report(
     try:
         content = final_message.get("content", "").strip()
 
-        # Strip markdown code blocks if present
+        # Clean markdown if present
         if content.startswith("```"):
             content = content.split("```")[1]
             if content.lower().startswith("json"):
                 content = content[4:].strip()
+
+        # Guard: detect if the model returned another tool call instead of the report
+        if content.strip().startswith("{") and '"name":' in content and '"arguments":' in content:
+            logger.error(
+                "llm_returned_tool_call_instead_of_report",
+                raw_content=content,
+            )
+            raise ValueError("Model returned a tool call instead of the final structured report")
 
         report = AnalysisReport.model_validate_json(content)
 
@@ -132,12 +163,19 @@ async def generate_analysis_report(
         )
         raise ValueError(f"LLM failed to return valid structured output: {e}") from e
 
+    if end_date is None:
+        end_date = date.today()
+    if start_date is None:
+        start_date = end_date - timedelta(days=7)
+
     # Only reach here if parsing succeeded
     if report_id:
         record = await session.get(AnalysisReportRecord, report_id)
         if record:
             record.status = "completed"
             record.completed_at = datetime.now(UTC)
+            record.period_start = start_date
+            record.period_end = end_date
             record.report_data = report.model_dump(mode="json")
             await session.commit()
 
