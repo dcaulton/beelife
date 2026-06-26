@@ -6,11 +6,24 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from beelife.analysis.report_models import AnalysisReport
+from beelife.analysis.reports import generate_analysis_report
 from beelife.db.models import BeeDarReading, Device
 from beelife.db.repositories import BeeDarRepository, DeviceRepository, get_default_device
 from beelife.db.session import get_db
 
 router = APIRouter(prefix="/beedar", tags=["beedar"])
+
+dep_get_db = (Depends(get_db),)
+
+
+@router.post("/daily-report")
+async def daily_analysis_report(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    device_id: str | None = None,
+) -> AnalysisReport:
+    report = await generate_analysis_report(session=db, device_id=device_id)
+    return report
 
 
 def get_beedar_repo(db: Annotated[AsyncSession, Depends(get_db)]) -> BeeDarRepository:
@@ -21,7 +34,7 @@ def get_beedar_repo(db: Annotated[AsyncSession, Depends(get_db)]) -> BeeDarRepos
 async def create_beedar_readings_bulk(
     file: Annotated[UploadFile, File(description="CSV file from MyBroodMinder")],
     repo: Annotated[BeeDarRepository, Depends(get_beedar_repo)],
-    db: Annotated[AsyncSession, Depends(get_db)],  # ← Add this
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     content = await file.read()
     text = content.decode("utf-8")

@@ -27,6 +27,7 @@ dependencies = [
     "mypy>=2.1.0",
     "asyncpg>=0.31.0",
     "python-multipart>=0.0.32",
+    "ollama>=0.6.2",
 ]
 
 [project.optional-dependencies]

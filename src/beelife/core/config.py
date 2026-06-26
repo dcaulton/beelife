@@ -1,6 +1,7 @@
 """Core settings for beelife."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlmodel import Field
 
 
 class Settings(BaseSettings):
@@ -24,6 +25,10 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+psycopg://beelife:beelife_dev@localhost:5434/beelife"
+
+    # Ollama
+    ollama_model: str = Field(default="qwen2.5:32b", validation_alias="OLLAMA_MODEL")
+    ollama_base_url: str = Field(default="http://localhost:11434", validation_alias="OLLAMA_BASE_URL")
 
 
 # Singleton instance
