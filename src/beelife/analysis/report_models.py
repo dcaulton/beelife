@@ -40,3 +40,4 @@ class AnalysisReport(BaseModel):
     weather_report: WeatherReport
     bee_status: BeeStatusReport
     overall_summary: str = Field(description="High-level synthesis of weather and bee activity")
+    graphs: dict[str, str | None] | None = None

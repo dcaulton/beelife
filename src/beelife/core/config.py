@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="qwen2.5:32b", validation_alias="OLLAMA_MODEL")
     ollama_base_url: str = Field(default="http://localhost:11434", validation_alias="OLLAMA_BASE_URL")
 
+    analysis_save_graph_files: bool = Field(default=False, validation_alias="ANALYSIS_SAVE_GRAPH_FILES")
+
 
 # Singleton instance
 settings = Settings()

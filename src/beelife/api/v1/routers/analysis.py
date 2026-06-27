@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from beelife.analysis.graphs import generate_report_graphs
 from beelife.analysis.report_models import AnalysisReport
 from beelife.analysis.reports import generate_analysis_report
 from beelife.api.v1.schemas.analysis import AnalysisReportDetail, AnalysisReportListItem
@@ -64,6 +65,10 @@ async def _run_analysis_in_background(
             end_date=end_date,
             report_id=report_id,
         )
+
+        # Generate graphs after successful report creation
+        graphs = generate_report_graphs(report, str(report_id))
+        report.graphs = graphs
 
         record = await db.get(AnalysisReportRecord, report_id)
         if record:
@@ -133,8 +138,10 @@ async def get_report(
     if record.report_data:
         try:
             report = AnalysisReport.model_validate(record.report_data)
+            graphs = report.graphs
         except Exception:
             report = None
+            graphs = None
 
     return AnalysisReportDetail(
         id=record.id,
@@ -144,4 +151,5 @@ async def get_report(
         completed_at=record.completed_at,
         error_message=record.error_message,
         report=report,
+        graphs=graphs,
     )

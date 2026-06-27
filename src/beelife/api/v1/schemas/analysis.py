@@ -27,3 +27,4 @@ class AnalysisReportDetail(BaseModel):
     completed_at: datetime | None = None
     error_message: str | None = None
     report: AnalysisReport | None = None  # decoded report when available
+    graphs: dict[str, str | None] | None = None
